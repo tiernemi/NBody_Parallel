@@ -23,7 +23,7 @@ animation:
 	rm -f "out.txt"
 
 plot:
-	./nbod -i 40000 -n 10 -e
+	./nbod -i 400000 -n 10 -e
 	gnuplot -e "load \"plot.gnu\"" --persist
 	rm -f "energy.txt"
 

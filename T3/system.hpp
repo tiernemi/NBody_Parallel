@@ -376,13 +376,16 @@ void System<DataType,Integrator,Potential>::updateForces() {
 			y_comp -= cellLength*std::round(y_comp*cellLengthInv) ;
 			// Calculate the force for this vector using the distance. //
 			DataType distSqr = x_comp*x_comp + y_comp*y_comp ;
-			DataType forceMag = Potential::calcForce(distSqr) ;
-			DataType xForce = forceMag*x_comp ;
-			DataType yForce = forceMag*y_comp ;
-			forces[2*i] += xForce ;
-			forces[2*i+1] += yForce ;
-			forces[2*j] -= xForce ;
-			forces[2*j+1] -= yForce ;
+			// Cutoff distance is when r = 2.5 sigma  . //
+			if (distSqr < Potential::cutOffDistSqr) {  
+				DataType forceMag = Potential::calcForce(distSqr) ;
+				DataType xForce = forceMag*x_comp ;
+				DataType yForce = forceMag*y_comp ;
+				forces[2*i] += xForce ;
+				forces[2*i+1] += yForce ;
+				forces[2*j] -= xForce ;
+				forces[2*j+1] -= yForce ;
+			}
 		}
 	}
 }		/* -----  end of member function updateForces  ----- */
@@ -410,15 +413,18 @@ void System<DataType,Integrator,Potential>::updateForcesEnergies() {
 			y_comp -= cellLength*std::round(y_comp*cellLengthInv) ;
 			// Calculate the force for this vector using the distance. //
 			DataType distSqr = x_comp*x_comp + y_comp*y_comp ;
-			DataType forceMag = Potential::calcForce(distSqr) ;
-			DataType xForce = forceMag*x_comp ;
-			DataType yForce = forceMag*y_comp ;
-			forces[2*i] += xForce ;
-			forces[2*i+1] += yForce ;
-			forces[2*j] -= xForce ;
-			forces[2*j+1] -= yForce ;
-			// Output energies. //
-			totEnergy += Potential::calcEnergy(distSqr) ;
+			// Cutoff distance is when r = 2.5 sigma  . //
+			if (distSqr < Potential::cutOffDistSqr) {
+				DataType forceMag = Potential::calcForce(distSqr) ;
+				DataType xForce = forceMag*x_comp ;
+				DataType yForce = forceMag*y_comp ;
+				forces[2*i] += xForce ;
+				forces[2*i+1] += yForce ;
+				forces[2*j] -= xForce ;
+				forces[2*j+1] -= yForce ;
+				// Calc energies. //
+				totEnergy += Potential::calcEnergy(distSqr) ;
+			}
 		}
 	}
 }		/* -----  end of member function updateForces  ----- */

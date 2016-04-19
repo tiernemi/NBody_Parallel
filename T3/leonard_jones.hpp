@@ -35,6 +35,8 @@ class LeonardJones {
 	 static inline DataType calcForce(const DataType & distance) ;
 	 template <class DataType>
 	 static inline DataType calcEnergy(const DataType & distance) ;
+ public:
+	 static constexpr double cutOffDistSqr = 5 ;
 } ;		/* -----  end of class LeonardJones  ----- */
 
 // TEMPLATED MEMBER FUNCTIONS //

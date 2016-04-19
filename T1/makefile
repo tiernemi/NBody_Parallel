@@ -18,7 +18,7 @@ clean:
 	rm -f $(OBJ) nbod
 
 animation:
-	./nbod -n 10000 > "out.txt"
+	./nbod -n 100000 > "out.txt"
 	gnuplot -e "load \"animation.gnu\"" --persist
 	rm -f "out.txt"
 

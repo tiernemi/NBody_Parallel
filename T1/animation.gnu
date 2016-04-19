@@ -8,7 +8,7 @@ set xrange [-2:2]
 set yrange [-2:2]
 
 stats "out.txt"
-do for [ii=1:STATS_blocks:100] {
+do for [ii=1:STATS_blocks-1:100] {
 	    plot "out.txt" index (ii-1) using 1:2 w p ls 1
 		pause 0.1	
 } 

@@ -4,11 +4,16 @@ unset key
 set border 0
 unset tics
 set view 342,0
-box = `head -n1 out.txt | awk '{print $6}'`
+box = `head -n1 out.txt0 | awk '{print $6}'`
+cmdStr = "ls -l out* | wc -l"
+numFiles = system(cmdStr)
+stats "out.txt0"
 set xrange [0:box]
 set yrange [0:box]
-stats "out.txt"
-do for [ii=1:STATS_blocks-1:450] {
-	    plot "out.txt" index (ii-1) using 1:2 w p ls 1
+do for [ii=1:STATS_blocks-1:10] {
+	    plot for [i=0:numFiles-1] 'out.txt'.i index (ii-1) using 1:2 w p pt 7 lc i ps 2
 		pause 0.1	
 } 
+
+
+

@@ -37,6 +37,7 @@ class LeonardJones {
 	 static inline DataType calcEnergy(const DataType & distance) ;
  public:
 	 static constexpr double cutOffDistSqr = 5 ;
+	 static constexpr double cutOffDist = 2.23 ;
 } ;		/* -----  end of class LeonardJones  ----- */
 
 // TEMPLATED MEMBER FUNCTIONS //

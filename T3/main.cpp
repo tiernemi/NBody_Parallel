@@ -25,9 +25,13 @@
 #include <cstdlib>
 #include <fstream>
 #include <tuple>
+#include "mpi_utils.hpp"
+#include "mpi.h"
+#include "torus_communicator.hpp"
 
 int main(int argc, char *argv[]) {
 
+	MPIUtils::initMPI(argc, argv) ;
 	// Get options. //
 	int numIters = 1E3 ; // Number of iterations to run for. 
 	int numParticles = 10 ;
@@ -72,15 +76,18 @@ int main(int argc, char *argv[]) {
 	// Set integration time step. //
 	Leapfrog::setDeltaT(deltaT) ;
 	// Create a system of particles integrated using leapfrog and subject to a LJ potential.
-	System<double,Leapfrog,LeonardJones> nbodySystem(cellLength) ;
+	System<double,Leapfrog,LeonardJones,TorusCommunicator> nbodySystem(cellLength) ;
 	// Add particles to the system using a uniform distribution for positions. //
-	nbodySystem.randomInitialise(15071992, numParticles) ;
-	
+	nbodySystem.randomInitialise(151992*MPIUtils::rank, numParticles) ;
+
 	if (animation) {
 		// If no file name passed then print to cout. //
 		if (filename.compare("") == 0) {
 			if (trackEnergy) {
-				std::ofstream en("energy.txt") ;
+				std::string enFileName("energy") ;
+				enFileName += std::to_string(MPIUtils::rank) ;
+				enFileName += ".txt" ;
+				std::ofstream en(enFileName) ;
 				nbodySystem.simulateEnergies(numIters, std::cout, en) ;
 				en.close() ;
 			} else {
@@ -89,9 +96,13 @@ int main(int argc, char *argv[]) {
 		} 
 		// Else print to filename.
 		else {
+			filename += std::to_string(MPIUtils::rank) ;
 			std::ofstream posOutput(filename) ;
 			if (trackEnergy) {
-				std::ofstream en("energy.txt") ;
+				std::string enFileName("energy") ;
+				enFileName += std::to_string(MPIUtils::rank) ;
+				enFileName += ".txt" ;
+				std::ofstream en(enFileName) ;
 				nbodySystem.simulateEnergies(numIters, posOutput, en) ;
 				en.close() ;
 			} else {
@@ -103,7 +114,10 @@ int main(int argc, char *argv[]) {
 	// If no file name passed then print to cout. //
 		if (filename.compare("") == 0) {
 			if (trackEnergy) {
-				std::ofstream en("energy.txt") ;
+				std::string enFileName("energy") ;
+				enFileName += std::to_string(MPIUtils::rank) ;
+				enFileName += ".txt" ;
+				std::ofstream en(enFileName) ;
 				nbodySystem.simulateEnergies(numIters, en) ;
 				nbodySystem.printSystem(std::cout,numIters) ;
 				en.close() ;
@@ -114,9 +128,13 @@ int main(int argc, char *argv[]) {
 		} 
 		// Else print to filename.
 		else {
+			filename += std::to_string(MPIUtils::rank) ;
 			std::ofstream posOutput(filename) ;
 			if (trackEnergy) {
-				std::ofstream en("energy.txt") ;
+				std::string enFileName("energy") ;
+				enFileName += std::to_string(MPIUtils::rank) ;
+				enFileName += ".txt" ;
+				std::ofstream en(enFileName) ;
 				nbodySystem.simulateEnergies(numIters, en) ;
 				nbodySystem.printSystem(posOutput,numIters) ;
 				en.close() ;
@@ -129,5 +147,6 @@ int main(int argc, char *argv[]) {
 
 	}
 
+	MPIUtils::finaliseMPI() ;
 	return EXIT_SUCCESS ;
 }

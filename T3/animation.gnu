@@ -10,7 +10,7 @@ numFiles = system(cmdStr)
 stats "out.txt0"
 set xrange [0:box]
 set yrange [0:box]
-do for [ii=1:STATS_blocks-1:10] {
+do for [ii=1:STATS_blocks-1:15] {
 	    plot for [i=0:numFiles-1] 'out.txt'.i index (ii-1) using 1:2 w p pt 7 lc i ps 2
 		pause 0.1	
 } 

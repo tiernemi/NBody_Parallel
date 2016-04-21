@@ -40,8 +40,6 @@ class TorusCommunicator {
 	static int * getCommDims() ;
 	template <typename DataType>
 	static inline void communicateBoundaries(std::vector<std::vector<DataType>> &, std::vector<std::vector<DataType>> &) ;
-	template <typename DataType>
-	static inline void tradeParticles(std::vector<std::vector<DataType>> &, std::vector<std::vector<DataType>> &) ;
 	// Helper enum. //
 	enum NEIGHBOURS {
 		LEFT,
@@ -55,9 +53,9 @@ class TorusCommunicator {
 	} ;
 	static NEIGHBOURS neighEnum ;
  private:
-	void sendSizes(int, int, int *, int *, MPI_Request &, MPI_Request &) ;
+	static void sendRecvSizes(int, int, int &, int &, MPI_Request &, MPI_Request &) ;
 	template <typename DataType>
-	void sendData(int, int, std::vector<std::vector<DataType>> &, std::vector<std::vector<DataType>> &, MPI_Request &, MPI_Request &) ;
+	static void sendRecvData(int, int, std::vector<DataType> &, std::vector<DataType> &, int &, int &, MPI_Request &, MPI_Request &) ;
  private:
 	static MPI_Comm communicator ;
 	static int cartCoords[2] ;
@@ -78,125 +76,70 @@ class TorusCommunicator {
  */
 
 template <typename DataType>
-void inline TorusCommunicator::communicateBoundaries(std::vector<std::vector<DataType>> & sendBuffers, std::vector<std::vector<DataType>> & recBuffers) {
+void inline TorusCommunicator::communicateBoundaries(std::vector<std::vector<DataType>> & sendBuffers, std::vector<std::vector<DataType>> & recvBuffers) {
 	MPI_Request reqS[8] ;
 	MPI_Request reqR[8] ;
 	MPI_Request reqPS[8] ;
 	MPI_Request reqPR[8] ;
+
+	for (int i = 0 ; i < 8 ; ++i) {	
+		reqS[i] = MPI_REQUEST_NULL ;
+		reqR[i] = MPI_REQUEST_NULL ;
+		reqPS[i] = MPI_REQUEST_NULL ;
+		reqPR[i] = MPI_REQUEST_NULL ;
+	}
 
 	int numElementsSent[8] ;
 	int numElementsRecv[8] ;
 	for (int i = 0 ; i < 8 ; ++i) {
 		numElementsSent[i] = sendBuffers[i].size() ;
 	}
-	// Send data sizes left. //
-	MPI_Isend(&numElementsSent[LEFT],1,MPI_INT,neighbourRanks[LEFT],LEFT,communicator,&reqPS[LEFT]);
-	MPI_Request_free(&reqPS[LEFT]) ;
-	MPI_Irecv(&numElementsRecv[RIGHT],1,MPI_INT,neighbourRanks[RIGHT],LEFT,communicator,&reqPR[RIGHT]) ;
-	// Send data sizes left. //
-	MPI_Isend(&numElementsSent[RIGHT],1,MPI_INT,neighbourRanks[RIGHT],RIGHT,communicator,&reqPS[RIGHT]);
-	MPI_Request_free(&reqPS[RIGHT]) ;
-	MPI_Irecv(&numElementsRecv[LEFT],1,MPI_INT,neighbourRanks[LEFT],RIGHT,communicator,&reqPR[LEFT]) ;
-	// Send data sizes left. //
-	MPI_Isend(&numElementsSent[TOP],1,MPI_INT,neighbourRanks[TOP],TOP,communicator,&reqPS[TOP]);
-	MPI_Request_free(&reqPS[TOP]) ;
-	MPI_Irecv(&numElementsRecv[BOT],1,MPI_INT,neighbourRanks[BOT],TOP,communicator,&reqPR[BOT]) ;
-	// Send data sizes left. //
-	MPI_Isend(&numElementsSent[BOT],1,MPI_INT,neighbourRanks[BOT],BOT,communicator,&reqPS[BOT]);
-	MPI_Request_free(&reqPS[BOT]) ;
-	MPI_Irecv(&numElementsRecv[TOP],1,MPI_INT,neighbourRanks[TOP],BOT,communicator,&reqPR[TOP]) ;
 
+	sendRecvSizes(LEFT,RIGHT,numElementsSent[LEFT],numElementsRecv[RIGHT],reqPS[LEFT],reqPR[RIGHT]) ;
+	sendRecvSizes(RIGHT,LEFT,numElementsSent[RIGHT],numElementsRecv[LEFT],reqPS[RIGHT],reqPR[LEFT]) ;
+	sendRecvSizes(BOT,TOP,numElementsSent[BOT],numElementsRecv[TOP],reqPS[BOT],reqPR[TOP]) ;
+	sendRecvSizes(TOP,BOT,numElementsSent[TOP],numElementsRecv[BOT],reqPS[TOP],reqPR[BOT]) ;
+	sendRecvSizes(TOPLEFT,BOTRIGHT,numElementsSent[TOPLEFT],numElementsRecv[BOTRIGHT],reqPS[TOPLEFT],reqPR[BOTRIGHT]) ;
+	sendRecvSizes(TOPRIGHT,BOTLEFT,numElementsSent[TOPRIGHT],numElementsRecv[BOTLEFT],reqPS[TOPRIGHT],reqPR[BOTLEFT]) ;
+	sendRecvSizes(BOTLEFT,TOPRIGHT,numElementsSent[BOTLEFT],numElementsRecv[TOPRIGHT],reqPS[BOTLEFT],reqPR[TOPRIGHT]) ;
+	sendRecvSizes(BOTRIGHT,TOPLEFT,numElementsSent[BOTRIGHT],numElementsRecv[TOPLEFT],reqPS[BOTRIGHT],reqPR[TOPLEFT]) ;
 	MPI_Waitall(8,reqPR,MPI_STATUS_IGNORE) ;
 
-	// Send Left boundaries. //
-	if (numElementsSent[LEFT] != 0) {
-		MPI_Isend(&sendBuffers[LEFT][0],numElementsSent[LEFT],MPI_DOUBLE,neighbourRanks[LEFT],LEFT,communicator,&reqS[LEFT]);
-		MPI_Request_free(&reqS[LEFT]) ;
-	}
-	if (numElementsRecv[RIGHT] != 0) {
-		recBuffers[RIGHT].resize(numElementsRecv[RIGHT]) ;
-		MPI_Irecv(&recBuffers[RIGHT][0],numElementsRecv[RIGHT],MPI_DOUBLE,neighbourRanks[RIGHT],LEFT,communicator,&reqR[RIGHT]) ;
-	}
-	// Send RIGHT boundaries. //
-	if (numElementsSent[RIGHT] != 0) {
-		MPI_Isend(&sendBuffers[RIGHT][0],numElementsSent[RIGHT],MPI_DOUBLE,neighbourRanks[RIGHT],RIGHT,communicator,&reqS[RIGHT]);
-		MPI_Request_free(&reqS[RIGHT]) ;
-	}
-	if (numElementsRecv[LEFT] != 0) {
-		recBuffers[LEFT].resize(numElementsRecv[LEFT]) ;
-		MPI_Irecv(&recBuffers[LEFT][0],numElementsRecv[LEFT],MPI_DOUBLE,neighbourRanks[LEFT],RIGHT,communicator,&reqR[LEFT]) ;
-	}
-	// Send BOT boundaries. //
-	if (numElementsSent[BOT] != 0) {
-		MPI_Isend(&sendBuffers[BOT][0],numElementsSent[BOT],MPI_DOUBLE,neighbourRanks[BOT],BOT,communicator,&reqS[BOT]);
-		MPI_Request_free(&reqS[BOT]) ;
-	}
-	if (numElementsRecv[TOP] != 0) {
-		recBuffers[TOP].resize(numElementsRecv[TOP]) ;
-		MPI_Irecv(&recBuffers[TOP][0],numElementsRecv[TOP],MPI_DOUBLE,neighbourRanks[TOP],BOT,communicator,&reqR[TOP]) ;
-	}
-	// Send TOP boundaries. //
-	if (numElementsSent[TOP] != 0) {
-		MPI_Isend(&sendBuffers[TOP][0],numElementsSent[TOP],MPI_DOUBLE,neighbourRanks[TOP],TOP,communicator,&reqS[TOP]);
-		MPI_Request_free(&reqS[TOP]) ;
-	}
-	if (numElementsRecv[BOT] != 0) {
-		recBuffers[BOT].resize(numElementsRecv[BOT]) ;
-		MPI_Irecv(&recBuffers[BOT][0],numElementsRecv[BOT],MPI_DOUBLE,neighbourRanks[BOT],TOP,communicator,&reqR[BOT]) ;
-	}
-	// Send TOPLEFT boundaries. //
-	if (numElementsSent[TOPLEFT] != 0) {
-		MPI_Isend(&sendBuffers[TOPLEFT][0],numElementsSent[TOPLEFT],MPI_DOUBLE,neighbourRanks[TOPLEFT],TOPLEFT,communicator,&reqS[TOPLEFT]);
-		MPI_Request_free(&reqS[TOPLEFT]) ;
-	}
-	if (numElementsRecv[BOTRIGHT] != 0) {
-		recBuffers[BOTRIGHT].resize(numElementsRecv[BOTRIGHT]) ;
-		MPI_Irecv(&recBuffers[BOTRIGHT][0],numElementsRecv[BOTRIGHT],MPI_DOUBLE,neighbourRanks[BOTRIGHT],TOPLEFT,communicator,&reqR[BOTRIGHT]) ;
-	}
-	// Send TOPRIGHT boundaries. //
-	if (numElementsSent[TOPRIGHT] != 0) {
-		MPI_Isend(&sendBuffers[TOPRIGHT][0],numElementsSent[TOPRIGHT],MPI_DOUBLE,neighbourRanks[TOPRIGHT],TOPRIGHT,communicator,&reqS[TOPRIGHT]);
-		MPI_Request_free(&reqS[TOPRIGHT]) ;
-	}
-	if (numElementsRecv[BOTLEFT] != 0) {
-		recBuffers[BOTLEFT].resize(numElementsRecv[BOTLEFT]) ;
-		MPI_Irecv(&recBuffers[BOTLEFT][0],numElementsRecv[BOTLEFT],MPI_DOUBLE,neighbourRanks[BOTLEFT],TOPRIGHT,communicator,&reqR[BOTLEFT]) ;
-	}
-	// Send BOTLEFT boundaries. //
-	if (numElementsSent[BOTLEFT] != 0) {
-		MPI_Isend(&sendBuffers[BOTLEFT][0],numElementsSent[BOTLEFT],MPI_DOUBLE,neighbourRanks[BOTLEFT],BOTLEFT,communicator,&reqS[BOTLEFT]);
-		MPI_Request_free(&reqS[BOTLEFT]) ;
-	}
-	if (numElementsRecv[TOPRIGHT] != 0) {
-		recBuffers[TOPRIGHT].resize(numElementsRecv[TOPRIGHT]) ;
-		MPI_Irecv(&recBuffers[TOPRIGHT][0],numElementsRecv[TOPRIGHT],MPI_DOUBLE,neighbourRanks[TOPRIGHT],BOTLEFT,communicator,&reqR[TOPRIGHT]) ;
-	}
-	// Send BOTRIGHT boundaries. //
-	if (numElementsSent[BOTRIGHT] != 0) {
-		MPI_Isend(&sendBuffers[BOTRIGHT][0],numElementsSent[BOTRIGHT],MPI_DOUBLE,neighbourRanks[BOTRIGHT],BOTRIGHT,communicator,&reqS[BOTRIGHT]);
-		MPI_Request_free(&reqS[BOTRIGHT]) ;
-	}
-	if (numElementsRecv[TOPLEFT] != 0) {
-		recBuffers[TOPLEFT].resize(numElementsRecv[TOPLEFT]) ;
-		MPI_Irecv(&recBuffers[TOPLEFT][0],numElementsRecv[TOPLEFT],MPI_DOUBLE,neighbourRanks[TOPLEFT],BOTRIGHT,communicator,&reqR[TOPLEFT]) ;
-	}	
+	sendRecvData(LEFT,RIGHT,sendBuffers[LEFT],recvBuffers[RIGHT],numElementsSent[LEFT],numElementsRecv[RIGHT],reqS[LEFT],reqR[RIGHT]) ;
+	sendRecvData(RIGHT,LEFT,sendBuffers[RIGHT],recvBuffers[LEFT],numElementsSent[RIGHT],numElementsRecv[LEFT],reqS[RIGHT],reqR[LEFT]) ;
+	sendRecvData(BOT,TOP,sendBuffers[BOT],recvBuffers[TOP],numElementsSent[BOT],numElementsRecv[TOP],reqS[BOT],reqR[TOP]) ;
+	sendRecvData(TOP,BOT,sendBuffers[TOP],recvBuffers[BOT],numElementsSent[TOP],numElementsRecv[BOT],reqS[TOP],reqR[BOT]) ;
+	sendRecvData(TOPLEFT,BOTRIGHT,sendBuffers[TOPLEFT],recvBuffers[BOTRIGHT],numElementsSent[TOPLEFT],numElementsRecv[BOTRIGHT],reqS[TOPLEFT],reqR[BOTRIGHT]) ;
+	sendRecvData(TOPRIGHT,BOTLEFT,sendBuffers[TOPRIGHT],recvBuffers[BOTLEFT],numElementsSent[TOPRIGHT],numElementsRecv[BOTLEFT],reqS[TOPRIGHT],reqR[BOTLEFT]) ;
+	sendRecvData(BOTLEFT,TOPRIGHT,sendBuffers[BOTLEFT],recvBuffers[TOPRIGHT],numElementsSent[BOTLEFT],numElementsRecv[TOPRIGHT],reqS[BOTLEFT],reqR[TOPRIGHT]) ;
+	sendRecvData(BOTRIGHT,TOPLEFT,sendBuffers[BOTRIGHT],recvBuffers[TOPLEFT],numElementsSent[BOTRIGHT],numElementsRecv[TOPLEFT],reqS[BOTRIGHT],reqR[TOPLEFT]) ;
+
 	MPI_Waitall(8,reqR,MPI_STATUS_IGNORE) ;
+	MPI_Barrier(MPI_COMM_WORLD) ;
 }
 
-/*  
- 
- *===  MEMBER FUNCTION CLASS : TorusCommunicator  ======================================
- *         Name:  recvBoundaryParticle
- *    Arguments:  int direction - Direction from which to recieve particle data.
- *                Datatype * sendbuf - Buffer used for receiving data.
- *  Description:  Recieves particles into buffer from specified direction.
+
+/* 
+ * ===  MEMBER FUNCTION CLASS : TorusCommunicator  ======================================
+ *         Name:  function
+ *    Arguments:  
+ *      Returns:  
+ *  Description:  
  * =====================================================================================
- 
+ */
 
 template <typename DataType>
-void inline TorusCommunicator::recvBoundaryParticles(int direction, DataType * sendBuffer) {
-}
-*/
+void TorusCommunicator::sendRecvData(int source, int dest, std::vector<DataType> & sendData, 
+		           std::vector<DataType> & recvData, int & numSent, int & numRecv, MPI_Request & reqS, MPI_Request & reqR) {
+	if (numSent != 0) {
+		MPI_Isend(&sendData[0],numSent,MPI_DOUBLE,neighbourRanks[source],source,communicator,&reqS);
+		MPI_Request_free(&reqS) ;
+	}
+	if (numRecv != 0) {
+		recvData.resize(numRecv) ;
+		MPI_Irecv(&recvData[0],numRecv,MPI_DOUBLE,neighbourRanks[dest],source,communicator,&reqR) ;
+	}
+}		/* -----  end of member function function  ----- */
 
 
 #endif /* end of include guard: TORUS_COMMUNICATOR_HPP_HG0MKCBV */

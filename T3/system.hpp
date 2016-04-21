@@ -61,10 +61,11 @@ class System {
 	void confineParticles() ;
 	void updateForces() ;
 	void updateForcesEnergies() ;
-	void fillDZoneBuffers() ;
-	void communicateBoundaries() ;
-	void fillTransitionBuffers() ;
-	void communicateTransitions() ;
+	void appendInteractionsToBuffers() ;
+	void appendTransitionsToBuffers() ;
+	void communicateInteractionsTransitions() ;
+	void clearBuffers() ;
+	void unpackData() ;
  private:
 	const DataType totCellLength ;
 	const DataType totCellLengthInv ;
@@ -81,6 +82,7 @@ class System {
 	std::vector<DataType> positions ;
 	std::vector<DataType> velocities ;
 	std::vector<DataType> forces ;
+	std::vector<DataType> boundaryGhostPositions ;
 	std::vector<std::vector<DataType>> sendBuffers ;
 	std::vector<std::vector<DataType>> recvBuffers ;
 	DataType totEnergy ;
@@ -103,8 +105,8 @@ System<DataType,Integrator,Potential,Communicator>::System(const DataType & totC
 	Communicator::initCommunicator() ;
 	cellLengthY = totCellLength/double(Communicator::getCommDims()[0]) ;
 	cellLengthX = totCellLength/double(Communicator::getCommDims()[1]) ;
-	bGlobalYOffset = cellLengthY*Communicator::getCoords()[1] ;
-	lGlobalXOffset = cellLengthX*Communicator::getCoords()[0] ;
+	bGlobalYOffset = cellLengthY*Communicator::getCoords()[0] ;
+	lGlobalXOffset = cellLengthX*Communicator::getCoords()[1] ;
 	rGlobalXOffset = lGlobalXOffset + cellLengthX ;
 	tGlobalYOffset = bGlobalYOffset + cellLengthY ;
 	totEnergy = 0 ;
@@ -130,9 +132,9 @@ template <class DataType, class Integrator, class Potential, class Communicator>
 void System<DataType,Integrator,Potential,Communicator>::randomInitialise(int seed, int numParts) {
 	std::mt19937 ranGen ;
 	ranGen.seed(seed) ;
-	std::uniform_real_distribution<DataType> posDistX(lGlobalXOffset,rGlobalXOffset) ;
-	std::uniform_real_distribution<DataType> posDistY(bGlobalYOffset,tGlobalYOffset) ;
-	std::normal_distribution<DataType> velDist(0,0.2) ;
+	std::uniform_real_distribution<DataType> posDistX(lGlobalXOffset+0.3,rGlobalXOffset-0.3) ;
+	std::uniform_real_distribution<DataType> posDistY(bGlobalYOffset+0.3,tGlobalYOffset-0.3) ;
+	std::normal_distribution<DataType> velDist(0,1) ;
 	for (int i = 0 ; i < numParts ; ++i) {
 		DataType newPartX = posDistX(ranGen) ;
 		DataType newPartY = posDistY(ranGen) ;
@@ -198,7 +200,6 @@ void System<DataType,Integrator,Potential,Communicator>::simulate(int numIters) 
 	}
 	// Update velocities and positions based on the integration policy. //
 	for (int i = 0; i < numIters ; ++i) {
-		fillDZoneBuffers() ;
 		updateVelocities() ;
 		updatePositions() ;
 		updateForces() ;
@@ -220,18 +221,25 @@ void System<DataType,Integrator,Potential,Communicator>::simulate(int numIters) 
 
 template <class DataType, class Integrator, class Potential, class Communicator> 
 void System<DataType,Integrator,Potential,Communicator>::simulate(int numIters, std::ostream & output) {
-	// Initialise the forces. //
-	updateForces() ;
 	// Prime the velocity based on the integration policy. //
 	for (unsigned int i = 0 ; i < positions.size() ; i+=2) {
 		Integrator::initialise(&positions[i], &velocities[i], &forces[i]) ;
 	}
+	// Initialise the forces. //
+	clearBuffers() ;
+	appendTransitionsToBuffers() ;
+	std::cout << 0 << std::endl;
+	appendInteractionsToBuffers() ;
+	communicateInteractionsTransitions() ;
+	updateForces() ;
 	// Update velocities and positions based on the integration policy. //
 	for (int i = 0; i < numIters ; ++i) {
 		updateVelocities() ;
 		updatePositions() ;
-		fillTransitionBuffers() ;
-		communicateTransitions() ;
+		clearBuffers() ;
+		appendTransitionsToBuffers() ;
+		appendInteractionsToBuffers() ;
+		communicateInteractionsTransitions() ;
 		updateForces() ;
 		printSystem(output,i) ;
 		output << std::endl << std::endl ;
@@ -414,12 +422,12 @@ void System<DataType,Integrator,Potential,Communicator>::updateForces() {
 		*i = 0 ;
 	}
 	// For each ij interaction calculate force. //
-	for (unsigned int i = 0 ; i < numParts ; ++i) {
-		for (unsigned int j = i+1 ; j < numParts ; ++j) {
+	for (unsigned int i = 0 ; i < numParts*2 ; i+=2) {
+		for (unsigned int j = i+2 ; j < numParts*2 ; j+=2) {
 			// Get shortest connecting vector in periodic system. //
-			DataType x_comp = (positions[2*j] - positions[2*i]) ;
+			DataType x_comp = (positions[j] - positions[i]) ;
 			x_comp -= totCellLength*std::round(x_comp*totCellLengthInv) ;
-			DataType y_comp = positions[2*j+1] - positions[2*i+1] ;
+			DataType y_comp = positions[j+1] - positions[i+1] ;
 			y_comp -= totCellLength*std::round(y_comp*totCellLengthInv) ;
 			// Calculate the force for this vector using the distance. //
 			DataType distSqr = x_comp*x_comp + y_comp*y_comp ;
@@ -428,10 +436,30 @@ void System<DataType,Integrator,Potential,Communicator>::updateForces() {
 				DataType forceMag = Potential::calcForce(distSqr) ;
 				DataType xForce = forceMag*x_comp ;
 				DataType yForce = forceMag*y_comp ;
-				forces[2*i] += xForce ;
-				forces[2*i+1] += yForce ;
-				forces[2*j] -= xForce ;
-				forces[2*j+1] -= yForce ;
+				forces[i] += xForce ;
+				forces[i+1] += yForce ;
+				forces[j] -= xForce ;
+				forces[j+1] -= yForce ;
+			}
+		}
+	}
+	// Consider the ghost particles. //
+	for (unsigned int i = 0 ; i < numParts*2 ; i+=2) {
+		for (unsigned int j = 0 ; j < boundaryGhostPositions.size() ; j+=2) {
+			// Get shortest connecting vector in periodic system. //
+			DataType x_comp = (boundaryGhostPositions[j] - positions[i]) ;
+			x_comp -= totCellLength*std::round(x_comp*totCellLengthInv) ;
+			DataType y_comp = boundaryGhostPositions[j+1] - positions[i+1] ;
+			y_comp -= totCellLength*std::round(y_comp*totCellLengthInv) ;
+			// Calculate the force for this vector using the distance. //
+			DataType distSqr = x_comp*x_comp + y_comp*y_comp ;
+			// Cutoff distance is when r = 2.5 sigma  . //
+			if (distSqr < Potential::cutOffDistSqr) {  
+				DataType forceMag = Potential::calcForce(distSqr) ;
+				DataType xForce = forceMag*x_comp ;
+				DataType yForce = forceMag*y_comp ;
+				forces[i] += xForce ;
+				forces[i+1] += yForce ;
 			}
 		}
 	}
@@ -476,6 +504,25 @@ void System<DataType,Integrator,Potential,Communicator>::updateForcesEnergies() 
 	}
 }		/* -----  end of member function updateForces  ----- */
 
+
+/* 
+ * ===  MEMBER FUNCTION CLASS : system  ======================================
+ *         Name:  function
+ *    Arguments:  
+ *      Returns:  
+ *  Description:  
+ * =====================================================================================
+ */
+
+template <class DataType, class Integrator, class Potential, class Communicator> 
+void System<DataType,Integrator,Potential,Communicator>::clearBuffers() {
+	for (int i = 0 ; i < 8 ; ++i) {
+		sendBuffers[i].clear() ;
+		recvBuffers[i].clear() ;
+	}
+	boundaryGhostPositions.clear() ;
+}		/* -----  end of member function function  ----- */
+
 /* 
  * ===  MEMBER FUNCTION CLASS : System  ================================================
  *         Name:  fillDxZoneBuffers
@@ -484,11 +531,7 @@ void System<DataType,Integrator,Potential,Communicator>::updateForcesEnergies() 
  */
 
 template <class DataType, class Integrator, class Potential, class Communicator> 
-void System<DataType,Integrator,Potential,Communicator>::fillDZoneBuffers() {
-	for (int i = 0 ; i < 8 ; ++i) {
-		sendBuffers[i].clear() ;
-	}
-
+void System<DataType,Integrator,Potential,Communicator>::appendInteractionsToBuffers() {
 	for (unsigned int i = 0 ; i < positions.size() ; i+=2) {
 		DataType x_comp = positions[i] ;
 		DataType y_comp = positions[i+1] ;
@@ -525,32 +568,14 @@ void System<DataType,Integrator,Potential,Communicator>::fillDZoneBuffers() {
 
 /* 
  * ===  MEMBER FUNCTION CLASS : System  ================================================
- *         Name:  communicateBoundaries
- *  Description:  Send and recieve boundary data. 
- * =====================================================================================
- */
-
-template <class DataType, class Integrator, class Potential, class Communicator> 
-void System<DataType,Integrator,Potential,Communicator>::communicateBoundaries() {
-	for (int i = 0 ; i < 8 ; ++i) {
-		recvBuffers[i].clear() ;
-	}
-	Communicator::communicateBoundaries(sendBuffers,recvBuffers) ;
-}
-
-/* 
- * ===  MEMBER FUNCTION CLASS : System  ================================================
  *         Name:  fillDxZoneBuffers
  *  Description:  Detects if particles are near boundaries and fills the buffers,
  * =====================================================================================
  */
 
 template <class DataType, class Integrator, class Potential, class Communicator> 
-void System<DataType,Integrator,Potential,Communicator>::fillTransitionBuffers() {
-	for (int i = 0 ; i < 8 ; ++i) {
-		sendBuffers[i].clear() ;
-	}
-
+void System<DataType,Integrator,Potential,Communicator>::appendTransitionsToBuffers() {
+	// Find transitions and add to relevent buffer. //
 	for (unsigned int i = 0 ; i < positions.size() ; i+=2) {
 		DataType x_comp = positions[i] ;
 		DataType y_comp = positions[i+1] ;
@@ -606,6 +631,10 @@ void System<DataType,Integrator,Potential,Communicator>::fillTransitionBuffers()
 			forces.pop_back() ;
 		} 
 	}
+	// Adds number of transitions to beginning of each send buffer. This is used to unpack later //
+	for (int i = 0 ; i < 8 ; ++i) {
+		sendBuffers[i].insert(sendBuffers[i].begin(),sendBuffers[i].size()/4) ;
+	}
 }
 
 /* 
@@ -616,23 +645,31 @@ void System<DataType,Integrator,Potential,Communicator>::fillTransitionBuffers()
  */
 
 template <class DataType, class Integrator, class Potential, class Communicator> 
-void System<DataType,Integrator,Potential,Communicator>::communicateTransitions() {
-	for (int i = 0 ; i < 8 ; ++i) {
-		recvBuffers[i].clear() ;
-	}
+void System<DataType,Integrator,Potential,Communicator>::communicateInteractionsTransitions() {
 	Communicator::communicateBoundaries(sendBuffers,recvBuffers) ;
+	// Unpack data. First handle transitions then interactions. //
 	for (int i = 0 ; i < 8 ; ++i) {
-		for (unsigned int j = 0 ; j < recvBuffers[i].size() ; j+=4) {
-			positions.push_back(recvBuffers[i][j]) ;
-			positions.push_back(recvBuffers[i][j+1]) ;
-			velocities.push_back(recvBuffers[i][j+2]) ;
-			velocities.push_back(recvBuffers[i][j+3]) ;
-			forces.push_back(0) ;
-			forces.push_back(0) ;
+		// Extract number of transitions. //
+		unsigned int numTransitions = recvBuffers[i][0] ;
+		unsigned int j = 1 ; 
+		if (numTransitions !=  0) {
+			for (j = 1 ; j < (numTransitions*4)+1 ; j+=4) {
+				positions.push_back(recvBuffers[i][j]) ;
+				positions.push_back(recvBuffers[i][j+1]) ;
+				velocities.push_back(recvBuffers[i][j+2]) ;
+				velocities.push_back(recvBuffers[i][j+3]) ;
+				forces.push_back(0) ;
+				forces.push_back(0) ;
+			}
+		}
+		// Extract interactions. //
+		for (j = j ; j < recvBuffers[i].size() ; j+=2) {
+			boundaryGhostPositions.push_back(recvBuffers[i][j]) ;
+			boundaryGhostPositions.push_back(recvBuffers[i][j+1]) ;
 		}
 	}
 }
-	
+
 /* 
  * ===  MEMBER FUNCTION CLASS : System  ================================================
  *         Name:  printSystem

@@ -25,8 +25,12 @@
 /* 
  * ===  CLASS  =========================================================================
  *         Name:  TorusCommunicator
- *       Fields:  
- *  Description:  
+ *       Fields:  MPI_Comm communicator - The cartesian communicator for system.
+ *                int cartCoords[2] - The cartesian co-ordinates of system.
+ *                int commDims[2] - The communicator dimensions.
+ *				  int neighbourRanks[8] - The ranks of the neighbouring processes.
+ *  Description:  Communicator used to send/recieve buffer data to and from 8 nearest
+ *                neighbours.
  * =====================================================================================
  */
 
@@ -71,7 +75,8 @@ class TorusCommunicator {
  *         Name:  commuincateBoundaries
  *    Arguments:  int direction - Direction in which to send particle data.
  *                Datatype * sendbuf - Buffer used for sending data.
- *  Description:  Sends particles in send buffer in specified direction.
+ *  Description:  Send corresponding send buffers to 8 nearest neighbours and then
+ *                recieves data from these 8 nearest neighbours.
  * =====================================================================================
  */
 
@@ -82,6 +87,7 @@ void inline TorusCommunicator::communicateBoundaries(std::vector<std::vector<Dat
 	MPI_Request reqPS[8] ;
 	MPI_Request reqPR[8] ;
 
+	// Initialise request objects.
 	for (int i = 0 ; i < 8 ; ++i) {	
 		reqS[i] = MPI_REQUEST_NULL ;
 		reqR[i] = MPI_REQUEST_NULL ;
@@ -95,6 +101,7 @@ void inline TorusCommunicator::communicateBoundaries(std::vector<std::vector<Dat
 		numElementsSent[i] = sendBuffers[i].size() ;
 	}
 
+	// Send and recieve the size of the data buffers for each neighbour. //
 	sendRecvSizes(LEFT,RIGHT,numElementsSent[LEFT],numElementsRecv[RIGHT],reqPS[LEFT],reqPR[RIGHT]) ;
 	sendRecvSizes(RIGHT,LEFT,numElementsSent[RIGHT],numElementsRecv[LEFT],reqPS[RIGHT],reqPR[LEFT]) ;
 	sendRecvSizes(BOT,TOP,numElementsSent[BOT],numElementsRecv[TOP],reqPS[BOT],reqPR[TOP]) ;
@@ -105,6 +112,7 @@ void inline TorusCommunicator::communicateBoundaries(std::vector<std::vector<Dat
 	sendRecvSizes(BOTRIGHT,TOPLEFT,numElementsSent[BOTRIGHT],numElementsRecv[TOPLEFT],reqPS[BOTRIGHT],reqPR[TOPLEFT]) ;
 	MPI_Waitall(8,reqPR,MPI_STATUS_IGNORE) ;
 
+	// Send and recieve the data buffers for each neighbour. //
 	sendRecvData(LEFT,RIGHT,sendBuffers[LEFT],recvBuffers[RIGHT],numElementsSent[LEFT],numElementsRecv[RIGHT],reqS[LEFT],reqR[RIGHT]) ;
 	sendRecvData(RIGHT,LEFT,sendBuffers[RIGHT],recvBuffers[LEFT],numElementsSent[RIGHT],numElementsRecv[LEFT],reqS[RIGHT],reqR[LEFT]) ;
 	sendRecvData(BOT,TOP,sendBuffers[BOT],recvBuffers[TOP],numElementsSent[BOT],numElementsRecv[TOP],reqS[BOT],reqR[TOP]) ;
@@ -118,27 +126,31 @@ void inline TorusCommunicator::communicateBoundaries(std::vector<std::vector<Dat
 	MPI_Barrier(MPI_COMM_WORLD) ;
 }
 
-
-/* 
+ /* 
  * ===  MEMBER FUNCTION CLASS : TorusCommunicator  ======================================
- *         Name:  function
- *    Arguments:  
- *      Returns:  
- *  Description:  
+ *         Name:  sendRecvData.
+ *    Arguments:  int source - The source of the size information.
+ *                int dest - The destination of the size information.
+ *                std::vector<Datatype> & sendData - Transition and/or ghost data to be sent.
+ *                std::vector<Datatype> & recvData - Transition and/or ghost data to be recieved.
+ *                int & numSent - Number of data points sent to dest.
+ *                int * numRecv - Number of data points to recieve from dest.
+ *                MPI_Request & reqPS - Request for sending.
+ *                MPI_Request & reqPR - Request for recieving.
+ *  Description:  Send and recieve the transition and ghost data between process source and dest.
  * =====================================================================================
  */
+
 
 template <typename DataType>
 void TorusCommunicator::sendRecvData(int source, int dest, std::vector<DataType> & sendData, 
 		           std::vector<DataType> & recvData, int & numSent, int & numRecv, MPI_Request & reqS, MPI_Request & reqR) {
-	if (numSent != 0) {
-		MPI_Isend(&sendData[0],numSent,MPI_DOUBLE,neighbourRanks[source],source,communicator,&reqS);
-		MPI_Request_free(&reqS) ;
-	}
-	if (numRecv != 0) {
-		recvData.resize(numRecv) ;
-		MPI_Irecv(&recvData[0],numRecv,MPI_DOUBLE,neighbourRanks[dest],source,communicator,&reqR) ;
-	}
+	// Send data to dest. //
+	MPI_Isend(&sendData[0],numSent,MPI_DOUBLE,neighbourRanks[source],source,communicator,&reqS);
+	MPI_Request_free(&reqS) ;
+	recvData.resize(numRecv) ;
+	// Recieve data from dest. //
+	MPI_Irecv(&recvData[0],numRecv,MPI_DOUBLE,neighbourRanks[dest],source,communicator,&reqR) ;
 }		/* -----  end of member function function  ----- */
 
 

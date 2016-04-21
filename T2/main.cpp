@@ -25,6 +25,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <tuple>
+#include "time_utils.hpp"
 
 int main(int argc, char *argv[]) {
 
@@ -36,9 +37,10 @@ int main(int argc, char *argv[]) {
 	bool trackEnergy = false ; // Flag for printing energy.
 	bool animation = false ; // Flag for creating animation output.
 	std::string filename = "" ; // Filename string.
+	bool benching = false ;
 	int choice ;
 	while (1) {
-		choice = getopt(argc, argv, "i:n:t:l:ef:a");	
+		choice = getopt(argc, argv, "i:n:t:l:ef:ab");	
 		if (choice == -1)
 			break;
 		switch( choice ) {
@@ -63,12 +65,18 @@ int main(int argc, char *argv[]) {
 			case 'a':
 				animation = true ;
 				break;
+			case 'b':
+				benching  = true ;
+				break;
 			default:
 				/* Not sure how to get here... */
 				return EXIT_FAILURE;
 		}
 	}
 	
+	if (benching) {
+		startClock() ;
+	}
 	// Set integration time step. //
 	Leapfrog::setDeltaT(deltaT) ;
 	// Create a system of particles integrated using leapfrog and subject to a LJ potential.
@@ -127,6 +135,11 @@ int main(int argc, char *argv[]) {
 			posOutput.close() ;
 		}
 
+	}
+
+	if (benching) {
+		stopClock() ;
+		std::cout << getElapsedTime() << std::endl ;
 	}
 
 	return EXIT_SUCCESS ;

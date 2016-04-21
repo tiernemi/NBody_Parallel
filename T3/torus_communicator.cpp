@@ -24,11 +24,11 @@ int TorusCommunicator::commDims[2] = {0,0} ;
 int TorusCommunicator::neighbourRanks[8] ;
 
 /* 
- * ===  MEMBER FUNCTION CLASS :   ======================================
- *         Name:  
- *    Arguments:  
- *      Returns:  
- *  Description:  
+ * ===  MEMBER FUNCTION CLASS : TorusCommunicator  =====================================
+ *         Name:  initCommunicator
+ *  Description:  Initialise the cartesian communicator, generates dimensions based on
+ *                the number of processes and determines the ranks of the neighbours.
+ *                Also enforces periodic boundary conditions.
  * =====================================================================================
  */
 
@@ -38,7 +38,6 @@ void TorusCommunicator::initCommunicator() {
 	int periodic[2] = {1,1} ;
 	MPI_Cart_create(MPI_COMM_WORLD,2,commDims,periodic,true,&communicator) ;
 	MPI_Cart_coords(communicator,MPIUtils::rank,2,cartCoords);
-
 	// Find the neighbouring ranks. //
 	MPI_Cart_shift(communicator,1,1,&neighbourRanks[LEFT],&neighbourRanks[RIGHT]) ;
 	MPI_Cart_shift(communicator,0,1,&neighbourRanks[BOT],&neighbourRanks[TOP]) ;
@@ -62,10 +61,15 @@ void TorusCommunicator::initCommunicator() {
 
 /* 
  * ===  MEMBER FUNCTION CLASS : TorusCommunicator  ======================================
- *         Name:  
- *    Arguments:  
- *      Returns:  
- *  Description:  
+ *         Name:  sendRecvSizes.
+ *    Arguments:  int source - The source of the size information.
+ *                int dest - The destination of the size information.
+ *                int & numSent - Number of data points sent to dest.
+ *                int * numRecv - Number of data points to recieve from dest.
+ *                MPI_Request & reqPS - Request for sending.
+ *                MPI_Request & reqPR - Request for recieving.
+ *  Description:  Send and recieve the size of the data sends required between source and
+ *                dest.
  * =====================================================================================
  */
 
@@ -78,9 +82,8 @@ void TorusCommunicator::sendRecvSizes(int source, int dest, int & numSent, int &
 /* 
  * ===  MEMBER FUNCTION CLASS : TorusCommunicator  ======================================
  *         Name:  getCommunicator
- *    Arguments:  
- *      Returns:  
- *  Description:  
+ *      Returns:  Cartesian communicator.
+ *  Description:  Returns the communicator.
  * =====================================================================================
  */
 
@@ -91,10 +94,9 @@ MPI_Comm & TorusCommunicator::getCommunicator() {
 
 /* 
  * ===  MEMBER FUNCTION CLASS : TorusCommunicator  ======================================
- *         Name:  getCommunicator
- *    Arguments:  
- *      Returns:  
- *  Description:  
+ *         Name:  getCoords.
+ *      Returns:  The co-ordinates array.
+ *  Description:  Returns array of cartesian co-ordinates of system.
  * =====================================================================================
  */
 
@@ -105,10 +107,8 @@ int * TorusCommunicator::getCoords() {
 
 /* 
  * ===  MEMBER FUNCTION CLASS : TorusCommunicator  ======================================
- *         Name:  
- *    Arguments:  
- *      Returns:  
- *  Description:  
+ *         Name:  getNeighbours
+ *      Returns:  An array of nearest neighbour ranks.
  * =====================================================================================
  */
 
@@ -119,13 +119,22 @@ int * TorusCommunicator::getNeighbours() {
 
 /* 
  * ===  MEMBER FUNCTION CLASS : TorusCommunicator  ======================================
- *         Name:  
- *    Arguments:  
- *      Returns:  
- *  Description:  
+ *         Name:  getCommDims
+ *      Returns:  An array of the communicator dimensions.
  * =====================================================================================
  */
 
 int * TorusCommunicator::getCommDims() {
 	return commDims ;
 }		/* -----  end of member function   ----- */
+
+/* 
+ * ===  MEMBER FUNCTION CLASS : TorusCommunicator  ======================================
+ *         Name:  destroyCommunicator
+ *  Description:  Frees memory associated with communicator.
+ * =====================================================================================
+ */
+
+void TorusCommunicator::destroyCommunicator() {
+	MPI_Comm_free(&communicator) ;
+}		/* -----  end of member function function  ----- */

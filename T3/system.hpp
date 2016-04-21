@@ -26,6 +26,7 @@
 #include <random>
 #include "mpi_utils.hpp"
 #include <algorithm>
+#include <mpi.h>
 
 /* 
  * ===  CLASS  =========================================================================
@@ -33,6 +34,21 @@
  *       Fields:  std::vector<DataType> positions - Array storing position data.
  *	              std::vector<DataType> velocities - Array storing velocity data.
  *	              std::vector<DataType> forces - Array storing force data.
+ *	              std::vector<DataType> boundaryGhostPositions - Array storing the ghost positions.
+ *	              Datatype totCellLength - Total cell length.
+ *	              Datatype totCellLengthInv - Inverse total cell length.
+ *	              Datatype cellLengthX - X length of cell on process.
+ *	              Datatype cellLengthY - Y length of cell on process.
+ *	              Datatype lDxZone - The left boundary of a process.
+ *	              Datatype rDxZone - The right boundary of a process.
+ *	              Datatype bDyZone - The bot boundary of a process.
+ *	              Datatype tDyZone - The top boundary of a process.
+ *				  std::vector<std::vector<DataType>> sendBuffers - The buffer for sending data.
+ *				  std::vector<std::vector<DataType>> recvBuffers - The buffer for recieve data.
+ *				  DataType totEnergy - Total energy on process.
+ *			 	  DataType initialEnergy - Initial energy of process.
+ *			 	  Datatype initialSysEnergy - Initial energy of entire system.
+ *
  *  Description:  System of particles subject to a particular potential specified by the
  *                policy Potential and a particular integration scheme specified by the
  *                policy Integrator. All data associated with the particles is stored
@@ -87,6 +103,7 @@ class System {
 	std::vector<std::vector<DataType>> recvBuffers ;
 	DataType totEnergy ;
 	DataType initialEnergy ;
+	DataType initialSysEnergy ;
 } ;		/* -----  end of class System  ----- */
 
 // TEMPLATED MEMBER FUNCTIONS //
@@ -112,6 +129,7 @@ System<DataType,Integrator,Potential,Communicator>::System(const DataType & totC
 	totEnergy = 0 ;
 	sendBuffers.resize(8) ;
 	recvBuffers.resize(8) ;
+	initialSysEnergy = 0 ;
 	lDxZone = lGlobalXOffset + Potential::cutOffDist ;
 	rDxZone = lGlobalXOffset + cellLengthX - Potential::cutOffDist ;
 	bDyZone = bGlobalYOffset + Potential::cutOffDist ;
@@ -134,7 +152,7 @@ void System<DataType,Integrator,Potential,Communicator>::randomInitialise(int se
 	ranGen.seed(seed) ;
 	std::uniform_real_distribution<DataType> posDistX(lGlobalXOffset+0.3,rGlobalXOffset-0.3) ;
 	std::uniform_real_distribution<DataType> posDistY(bGlobalYOffset+0.3,tGlobalYOffset-0.3) ;
-	std::normal_distribution<DataType> velDist(0,1) ;
+	std::normal_distribution<DataType> velDist(0,0.2) ;
 	for (int i = 0 ; i < numParts ; ++i) {
 		DataType newPartX = posDistX(ranGen) ;
 		DataType newPartY = posDistY(ranGen) ;
@@ -192,6 +210,11 @@ void System<DataType,Integrator,Potential,Communicator>::addParticle(const std::
 
 template <class DataType, class Integrator, class Potential, class Communicator> 
 void System<DataType,Integrator,Potential,Communicator>::simulate(int numIters) {
+	// MPI Comms. //
+	clearBuffers() ;
+	appendTransitionsToBuffers() ;
+	appendInteractionsToBuffers() ;
+	communicateInteractionsTransitions() ;
 	// Initialise the forces. //
 	updateForces() ;
 	// Prime the velocity based on the integration policy. //
@@ -202,12 +225,13 @@ void System<DataType,Integrator,Potential,Communicator>::simulate(int numIters) 
 	for (int i = 0; i < numIters ; ++i) {
 		updateVelocities() ;
 		updatePositions() ;
+		// MPI Comms. //
+		clearBuffers() ;
+		appendTransitionsToBuffers() ;
+		appendInteractionsToBuffers() ;
+		communicateInteractionsTransitions() ;
 		updateForces() ;
-		if (i % 1000 == 0) {
-			confineParticles() ;
-		}
 	}
-	confineParticles() ;
 }		/* -----  end of member function simulate  ----- */
 
 /* 
@@ -221,21 +245,22 @@ void System<DataType,Integrator,Potential,Communicator>::simulate(int numIters) 
 
 template <class DataType, class Integrator, class Potential, class Communicator> 
 void System<DataType,Integrator,Potential,Communicator>::simulate(int numIters, std::ostream & output) {
+	// MPI Comms. //
+	clearBuffers() ;
+	appendTransitionsToBuffers() ;
+	appendInteractionsToBuffers() ;
+	communicateInteractionsTransitions() ;
+	// Initialise the forces. //
+	updateForces() ;
 	// Prime the velocity based on the integration policy. //
 	for (unsigned int i = 0 ; i < positions.size() ; i+=2) {
 		Integrator::initialise(&positions[i], &velocities[i], &forces[i]) ;
 	}
-	// Initialise the forces. //
-	clearBuffers() ;
-	appendTransitionsToBuffers() ;
-	std::cout << 0 << std::endl;
-	appendInteractionsToBuffers() ;
-	communicateInteractionsTransitions() ;
-	updateForces() ;
 	// Update velocities and positions based on the integration policy. //
 	for (int i = 0; i < numIters ; ++i) {
 		updateVelocities() ;
 		updatePositions() ;
+		// MPI Comms. 
 		clearBuffers() ;
 		appendTransitionsToBuffers() ;
 		appendInteractionsToBuffers() ;
@@ -259,39 +284,52 @@ void System<DataType,Integrator,Potential,Communicator>::simulate(int numIters, 
 
 template <class DataType, class Integrator, class Potential, class Communicator> 
 void System<DataType,Integrator,Potential,Communicator>::simulateEnergies(int numIters, std::ostream & outputPos, std::ostream & outputEn) {
-	// Initialise the forces. //
+	// Initialise the forces/energies. //
 	initialEnergy = 0 ;
 	totEnergy = 0 ;
-	updateForcesEnergies() ;
+	clearBuffers() ;
+	appendTransitionsToBuffers() ;
+	appendInteractionsToBuffers() ;
+	communicateInteractionsTransitions() ;
+	updateForcesEnergies() ;	
 	// Prime the velocity based on the integration policy. //
 	for (unsigned int i = 0 ; i < positions.size() ; i+=2) {
 		Integrator::initialise(&positions[i], &velocities[i], &forces[i]) ;
 	}
-
 	// Get initial energy of system and advance 1 time step. //
 	updateVelocitiesEnergies() ;
 	initialEnergy = totEnergy ;
+	// Send rank 0 the total initial system energy.
+	MPI_Reduce(&totEnergy,&initialSysEnergy,1,MPI_DOUBLE,MPI_SUM,0,MPI_COMM_WORLD) ;
 	updatePositions() ;
+	// Print intial energies. //
 	printEnergies(outputEn,0) ;
 	totEnergy = 0 ;
+	// MPI Comms. //
+	clearBuffers() ;
+	appendTransitionsToBuffers() ;
+	appendInteractionsToBuffers() ;
+	communicateInteractionsTransitions() ;
+	// Update forces for timesetp 2. //
 	updateForcesEnergies() ;
 	outputPos << std::endl << std::endl ;
-	confineParticles() ;
 
 	// Update velocities and positions based on the integration policy. //
 	for (int i = 1; i < numIters ; ++i) {
 		updateVelocitiesEnergies() ;
 		updatePositions() ;
+		// MPI comms. //
+		clearBuffers() ;
+		appendTransitionsToBuffers() ;
+		appendInteractionsToBuffers() ;
+		communicateInteractionsTransitions() ;
+		// Print energies. //
 		printEnergies(outputEn,i) ;
 		totEnergy = 0 ;
 		updateForcesEnergies() ;
 		printSystem(outputPos,i) ;
 		outputPos << std::endl << std::endl ;
-		if (i % 1000 == 0) {
-			confineParticles() ;
-		}
 	}
-	confineParticles() ;
 }		/* -----  end of member function simulate  ----- */
 
 /* 
@@ -305,6 +343,11 @@ void System<DataType,Integrator,Potential,Communicator>::simulateEnergies(int nu
 
 template <class DataType, class Integrator, class Potential, class Communicator> 
 void System<DataType,Integrator,Potential,Communicator>::simulateEnergies(int numIters, std::ostream & outputEn) {
+	// MPI Comms. //
+	clearBuffers() ;
+	appendTransitionsToBuffers() ;
+	appendInteractionsToBuffers() ;
+	communicateInteractionsTransitions() ;
 	// Initialise the forces. //
 	initialEnergy = 0 ;
 	totEnergy = 0 ;
@@ -317,23 +360,30 @@ void System<DataType,Integrator,Potential,Communicator>::simulateEnergies(int nu
 	// Get initial energy of system and advance 1 time step. //
 	updateVelocitiesEnergies() ;
 	initialEnergy = totEnergy ;
+	// Send rank 0 the total initial system energy.
+	MPI_Reduce(&totEnergy,&initialSysEnergy,1,MPI_DOUBLE,MPI_SUM,0,MPI_COMM_WORLD) ;
 	updatePositions() ;
 	totEnergy = 0 ;
+	// MPI Comms. //
+	clearBuffers() ;
+	appendTransitionsToBuffers() ;
+	appendInteractionsToBuffers() ;
+	communicateInteractionsTransitions() ;
+	// Update forces for timestep t1. //
 	updateForcesEnergies() ;
-	confineParticles() ;
-
 	// Update velocities and positions based on the integration policy. //
 	for (int i = 1; i < numIters ; ++i) {
 		updateVelocitiesEnergies() ;
 		updatePositions() ;
 		printEnergies(outputEn,i) ;
 		totEnergy = 0 ;
+		// MPI Comms. //
+		clearBuffers() ;
+		appendTransitionsToBuffers() ;
+		appendInteractionsToBuffers() ;
+		communicateInteractionsTransitions() ;
 		updateForcesEnergies() ;
-		if (i % 1000 == 0) {
-			confineParticles() ;
-		}
 	}
-	confineParticles() ;
 }		/* -----  end of member function simulate  ----- */
 
 
@@ -479,12 +529,12 @@ void System<DataType,Integrator,Potential,Communicator>::updateForcesEnergies() 
 		*i = 0 ;
 	}
 	// For each ij interaction calculate force. //
-	for (unsigned int i = 0 ; i < numParts ; ++i) {
-		for (unsigned int j = i+1 ; j < numParts ; ++j) {	
+	for (unsigned int i = 0 ; i < numParts*2 ; i+=2) {
+		for (unsigned int j = i+2 ; j < numParts*2 ; j+=2) {	
 			// Get shortest connecting vector in periodic system. //
-			DataType x_comp = (positions[2*j] - positions[2*i]) ;
+			DataType x_comp = (positions[j] - positions[i]) ;
 			x_comp -= totCellLength*std::round(x_comp*totCellLengthInv) ;
-			DataType y_comp = positions[2*j+1] - positions[2*i+1] ;
+			DataType y_comp = positions[j+1] - positions[i+1] ;
 			y_comp -= totCellLength*std::round(y_comp*totCellLengthInv) ;
 			// Calculate the force for this vector using the distance. //
 			DataType distSqr = x_comp*x_comp + y_comp*y_comp ;
@@ -493,11 +543,32 @@ void System<DataType,Integrator,Potential,Communicator>::updateForcesEnergies() 
 				DataType forceMag = Potential::calcForce(distSqr) ;
 				DataType xForce = forceMag*x_comp ;
 				DataType yForce = forceMag*y_comp ;
-				forces[2*i] += xForce ;
-				forces[2*i+1] += yForce ;
-				forces[2*j] -= xForce ;
-				forces[2*j+1] -= yForce ;
+				forces[i] += xForce ;
+				forces[i+1] += yForce ;
+				forces[j] -= xForce ;
+				forces[j+1] -= yForce ;
 				// Calc energies. //
+				totEnergy += Potential::calcEnergy(distSqr) ;
+			}
+		}
+	}
+	// Consider the ghost particles. //
+	for (unsigned int i = 0 ; i < numParts*2 ; i+=2) {
+		for (unsigned int j = 0 ; j < boundaryGhostPositions.size() ; j+=2) {
+			// Get shortest connecting vector in periodic system. //
+			DataType x_comp = (boundaryGhostPositions[j] - positions[i]) ;
+			x_comp -= totCellLength*std::round(x_comp*totCellLengthInv) ;
+			DataType y_comp = boundaryGhostPositions[j+1] - positions[i+1] ;
+			y_comp -= totCellLength*std::round(y_comp*totCellLengthInv) ;
+			// Calculate the force for this vector using the distance. //
+			DataType distSqr = x_comp*x_comp + y_comp*y_comp ;
+			// Cutoff distance is when r = 2.5 sigma  . //
+			if (distSqr < Potential::cutOffDistSqr) {  
+				DataType forceMag = Potential::calcForce(distSqr) ;
+				DataType xForce = forceMag*x_comp ;
+				DataType yForce = forceMag*y_comp ;
+				forces[i] += xForce ;
+				forces[i+1] += yForce ;
 				totEnergy += Potential::calcEnergy(distSqr) ;
 			}
 		}
@@ -508,9 +579,7 @@ void System<DataType,Integrator,Potential,Communicator>::updateForcesEnergies() 
 /* 
  * ===  MEMBER FUNCTION CLASS : system  ======================================
  *         Name:  function
- *    Arguments:  
- *      Returns:  
- *  Description:  
+ *  Description:  Clears send buffer, recv buffer and ghost particles.
  * =====================================================================================
  */
 
@@ -526,7 +595,8 @@ void System<DataType,Integrator,Potential,Communicator>::clearBuffers() {
 /* 
  * ===  MEMBER FUNCTION CLASS : System  ================================================
  *         Name:  fillDxZoneBuffers
- *  Description:  Detects if particles are near boundaries and fills the buffers,
+ *  Description:  Detects if particles are near boundaries and fills the buffers with
+ *               these ghost particles.
  * =====================================================================================
  */
 
@@ -535,31 +605,43 @@ void System<DataType,Integrator,Potential,Communicator>::appendInteractionsToBuf
 	for (unsigned int i = 0 ; i < positions.size() ; i+=2) {
 		DataType x_comp = positions[i] ;
 		DataType y_comp = positions[i+1] ;
+		// Check left
 		if (x_comp < lDxZone) {
 			sendBuffers[Communicator::LEFT].push_back(positions[i]) ;
 			sendBuffers[Communicator::LEFT].push_back(positions[i+1]) ;
+			// BotLeft
 			if (y_comp < bDyZone) {
 				sendBuffers[Communicator::BOTLEFT].push_back(positions[i]) ;
 				sendBuffers[Communicator::BOTLEFT].push_back(positions[i+1]) ;
-			} else if (y_comp > tDyZone) {
+			} 
+			// TopLeft
+			else if (y_comp > tDyZone) {
 				sendBuffers[Communicator::TOPLEFT].push_back(positions[i]) ;
 				sendBuffers[Communicator::TOPLEFT].push_back(positions[i+1]) ;
 			}
-		} else if (x_comp > rDxZone) {
+		} 
+		// Check right
+		else if (x_comp > rDxZone) {
 			sendBuffers[Communicator::RIGHT].push_back(positions[i]) ;
 			sendBuffers[Communicator::RIGHT].push_back(positions[i+1]) ;
+			// BotRight
 			if (y_comp < bDyZone) {
 				sendBuffers[Communicator::BOTRIGHT].push_back(positions[i]) ;
 				sendBuffers[Communicator::BOTRIGHT].push_back(positions[i+1]) ;
-			} else if (y_comp > tDyZone) {
+			} 
+			// TopRight
+			else if (y_comp > tDyZone) {
 				sendBuffers[Communicator::TOPRIGHT].push_back(positions[i]) ;
 				sendBuffers[Communicator::TOPRIGHT].push_back(positions[i+1]) ;
 			}
 		}
+		// Check bot
 		if (y_comp < bDyZone) {
 			sendBuffers[Communicator::BOT].push_back(positions[i]) ;
 			sendBuffers[Communicator::BOT].push_back(positions[i+1]) ;
-		} else if (y_comp > tDyZone) {
+		} 
+		// Check top
+		else if (y_comp > tDyZone) {
 			sendBuffers[Communicator::TOP].push_back(positions[i]) ;
 			sendBuffers[Communicator::TOP].push_back(positions[i+1]) ;
 		}
@@ -569,7 +651,8 @@ void System<DataType,Integrator,Potential,Communicator>::appendInteractionsToBuf
 /* 
  * ===  MEMBER FUNCTION CLASS : System  ================================================
  *         Name:  fillDxZoneBuffers
- *  Description:  Detects if particles are near boundaries and fills the buffers,
+ *  Description:  Detects if particles have passed boundaries and fills the buffers with
+ *                these particles. Destroys particle on this process.
  * =====================================================================================
  */
 
@@ -608,7 +691,6 @@ void System<DataType,Integrator,Potential,Communicator>::appendTransitionsToBuff
 			sendBuffers[Communicator::BOT].push_back(velocities[i+1]) ;
 			hasLeftProcess = true ;
 		} else if (y_comp > tGlobalYOffset) {
-			std::cout << y_comp << std::endl;
 			if (y_comp > totCellLength) {
 				positions[i+1] = positions[i+1] - totCellLength ;
 			}
@@ -618,6 +700,7 @@ void System<DataType,Integrator,Potential,Communicator>::appendTransitionsToBuff
 			sendBuffers[Communicator::TOP].push_back(velocities[i+1]) ;
 			hasLeftProcess = true ;
 		}
+		// Destroy particle. //
 		if (hasLeftProcess) {
 			std::iter_swap(positions.begin()+i+1,positions.end()-1);
   			positions.pop_back();
@@ -703,7 +786,11 @@ void System<DataType,Integrator,Potential,Communicator>::printSystem(std::ostrea
 
 template <class DataType, class Integrator, class Potential, class Communicator> 
 void System<DataType,Integrator,Potential,Communicator>::printEnergies(std::ostream & out, int iter) const {
-	out << (initialEnergy - totEnergy) << " " << iter  << std::endl ;
+	DataType sysEnergy = 0 ;
+	MPI_Reduce(&totEnergy,&sysEnergy,1,MPI_DOUBLE,MPI_SUM,0,MPI_COMM_WORLD) ;
+	if (MPIUtils::rank == 0) {
+		out << initialSysEnergy - sysEnergy << " " << iter  << std::endl ;
+	}
 }		/* -----  end of member function printSystem  ----- */
 
 /* 

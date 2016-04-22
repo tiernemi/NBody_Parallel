@@ -28,12 +28,12 @@ clean:
 	rm -f $(OBJ) nbod
 
 animation:
-	mpirun -n 6 ./nbod -i 1000 -n 10 -f "out.txt" -a
+	mpirun -n 6 ./nbod -i 5000 -n 40 -f "out.txt" -a
 	gnuplot -e "load \"animation.gnu\"" --persist
 	rm -f "out.txt"
 
 plot:
-	mpirun -n 6 ./nbod -i 1000 -n 10 -e
+	mpirun -n 6 ./nbod -i 1000 -n 40 -e
 	gnuplot -e "load \"plot.gnu\"" --persist
 	rm -f "energy.txt"
 

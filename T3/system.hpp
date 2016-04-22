@@ -153,7 +153,7 @@ void System<DataType,Integrator,Potential,Communicator>::randomInitialise(int se
 	std::uniform_real_distribution<DataType> posDistX(lGlobalXOffset+0.3,rGlobalXOffset-0.3) ;
 	std::uniform_real_distribution<DataType> posDistY(bGlobalYOffset+0.3,tGlobalYOffset-0.3) ;
 	std::normal_distribution<DataType> velDist(0,0.2) ;
-	for (int i = 0 ; i < numParts ; ++i) {
+	for (int i = 0 ; i < numParts/MPIUtils::nproc ; ++i) {
 		DataType newPartX = posDistX(ranGen) ;
 		DataType newPartY = posDistY(ranGen) ;
 		DataType newVelX = velDist(ranGen) ;
@@ -179,6 +179,38 @@ void System<DataType,Integrator,Potential,Communicator>::randomInitialise(int se
 					std::pair<DataType,DataType>(newVelX,newVelY)) ;
 		}
 	}
+
+	if (MPIUtils::rank < numParts%MPIUtils::nproc) {
+		bool tooClose = true ;
+		while (tooClose) {
+			DataType newPartX = posDistX(ranGen) ;
+			DataType newPartY = posDistY(ranGen) ;
+			DataType newVelX = velDist(ranGen) ;
+			DataType newVelY = velDist(ranGen) ;
+			tooClose = false ;
+			// Check if the particle is too close to another particle. //
+			for (unsigned int j = 0 ; j < positions.size() ; j+=2) {
+				DataType x_comp = positions[j]-newPartX ;
+				x_comp -= totCellLength*std::round(x_comp*totCellLengthInv) ;
+				DataType y_comp = positions[j+1]-newPartY ;
+				y_comp -= totCellLength*std::round(y_comp*totCellLengthInv) ;
+				if (std::sqrt(x_comp*x_comp + y_comp*y_comp) < 0.8) {
+					tooClose = true ;
+					break ;
+				}
+			}
+			if (tooClose) {
+				// Try again.
+				continue ;
+			} else {
+				// Add a new particle. //
+				addParticle(std::pair<DataType,DataType>(newPartX,newPartY),
+						std::pair<DataType,DataType>(newVelX,newVelY)) ;
+				tooClose = false ;
+			}
+		}
+	}
+
 }
 
 /* 

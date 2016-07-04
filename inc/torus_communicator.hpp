@@ -71,13 +71,13 @@ class TorusCommunicator {
 // TEMPLATED MEMBER FUNCTIONS //
 
 /* 
- * ===  MEMBER FUNCTION CLASS : TorusCommunicator  ======================================
+ * ===  MEMBER FUNCTION CLASS : TorusCommunicator  ========================================
  *         Name:  commuincateBoundaries
  *    Arguments:  int direction - Direction in which to send particle data.
  *                Datatype * sendbuf - Buffer used for sending data.
  *  Description:  Send corresponding send buffers to 8 nearest neighbours and then
  *                recieves data from these 8 nearest neighbours.
- * =====================================================================================
+ * ============================================================================================
  */
 
 template <typename DataType>
@@ -127,7 +127,7 @@ void inline TorusCommunicator::communicateBoundaries(std::vector<std::vector<Dat
 }
 
  /* 
- * ===  MEMBER FUNCTION CLASS : TorusCommunicator  ======================================
+ * ===  MEMBER FUNCTION CLASS : TorusCommunicator  ==============================================
  *         Name:  sendRecvData.
  *    Arguments:  int source - The source of the size information.
  *                int dest - The destination of the size information.
@@ -138,7 +138,7 @@ void inline TorusCommunicator::communicateBoundaries(std::vector<std::vector<Dat
  *                MPI_Request & reqPS - Request for sending.
  *                MPI_Request & reqPR - Request for recieving.
  *  Description:  Send and recieve the transition and ghost data between process source and dest.
- * =====================================================================================
+ * ==============================================================================================
  */
 
 

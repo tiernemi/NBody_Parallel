@@ -424,10 +424,8 @@ void System<DataType,Integrator,Potential,Communicator>::updateForces() {
 	}
 }		/* -----  end of member function updateForces  ----- */
 
-
-
 /* 
- * ===  MEMBER FUNCTION CLASS : system  ======================================
+ * ===  MEMBER FUNCTION CLASS : System  ================================================
  *         Name:  function
  *  Description:  Clears send buffer, recv buffer and ghost particles.
  * =====================================================================================
@@ -456,42 +454,51 @@ void System<DataType,Integrator,Potential,Communicator>::appendInteractionsToBuf
 		DataType x_comp = positions[i] ;
 		DataType y_comp = positions[i+1] ;
 		// Check left
-		if (x_comp < lDxZone) {
+		if (x_comp < lDxZone && Communicator::getNeighbours()[Communicator::LEFT] != MPIUtils::rank) {
 			sendBuffers[Communicator::LEFT].push_back(positions[i]) ;
 			sendBuffers[Communicator::LEFT].push_back(positions[i+1]) ;
 			// BotLeft
 			if (y_comp < bDyZone) {
-				sendBuffers[Communicator::BOTLEFT].push_back(positions[i]) ;
-				sendBuffers[Communicator::BOTLEFT].push_back(positions[i+1]) ;
+				if (Communicator::getNeighbours()[Communicator::BOT] != MPIUtils::rank) {
+					sendBuffers[Communicator::BOTLEFT].push_back(positions[i]) ;
+					sendBuffers[Communicator::BOTLEFT].push_back(positions[i+1]) ;
+				}
 			} 
 			// TopLeft
 			else if (y_comp > tDyZone) {
-				sendBuffers[Communicator::TOPLEFT].push_back(positions[i]) ;
-				sendBuffers[Communicator::TOPLEFT].push_back(positions[i+1]) ;
+				if (Communicator::getNeighbours()[Communicator::TOP] != MPIUtils::rank) {
+					sendBuffers[Communicator::TOPLEFT].push_back(positions[i]) ;
+					sendBuffers[Communicator::TOPLEFT].push_back(positions[i+1]) ;
+				}
 			}
 		} 
 		// Check right
-		else if (x_comp > rDxZone) {
+		else if (x_comp > rDxZone && Communicator::getNeighbours()[Communicator::RIGHT] != MPIUtils::rank) {
 			sendBuffers[Communicator::RIGHT].push_back(positions[i]) ;
 			sendBuffers[Communicator::RIGHT].push_back(positions[i+1]) ;
 			// BotRight
 			if (y_comp < bDyZone) {
-				sendBuffers[Communicator::BOTRIGHT].push_back(positions[i]) ;
-				sendBuffers[Communicator::BOTRIGHT].push_back(positions[i+1]) ;
+				if (Communicator::getNeighbours()[Communicator::BOT] != MPIUtils::rank) {
+					sendBuffers[Communicator::BOTRIGHT].push_back(positions[i]) ;
+					sendBuffers[Communicator::BOTRIGHT].push_back(positions[i+1]) ;
+				}
 			} 
 			// TopRight
 			else if (y_comp > tDyZone) {
-				sendBuffers[Communicator::TOPRIGHT].push_back(positions[i]) ;
-				sendBuffers[Communicator::TOPRIGHT].push_back(positions[i+1]) ;
+				if (Communicator::getNeighbours()[Communicator::TOP] != MPIUtils::rank) {
+					sendBuffers[Communicator::TOPRIGHT].push_back(positions[i]) ;
+					sendBuffers[Communicator::TOPRIGHT].push_back(positions[i+1]) ;
+				}
 			}
 		}
 		// Check bot
-		if (y_comp < bDyZone) {
+		if (y_comp < bDyZone && Communicator::getNeighbours()[Communicator::BOT] != MPIUtils::rank) {
 			sendBuffers[Communicator::BOT].push_back(positions[i]) ;
 			sendBuffers[Communicator::BOT].push_back(positions[i+1]) ;
 		} 
 		// Check top
-		else if (y_comp > tDyZone) {
+		else if (y_comp > tDyZone && Communicator::getNeighbours()[Communicator::TOP] != MPIUtils::rank) {
+			// Handle own neighbour case. //
 			sendBuffers[Communicator::TOP].push_back(positions[i]) ;
 			sendBuffers[Communicator::TOP].push_back(positions[i+1]) ;
 		}
@@ -573,7 +580,8 @@ void System<DataType,Integrator,Potential,Communicator>::appendTransitionsToBuff
 /* 
  * ===  MEMBER FUNCTION CLASS : System  ================================================
  *         Name:  fillDxZoneBuffers
- *  Description:  Detects if particles are near boundaries and fills the buffers,
+ *  Description:  Detects if particles are near boundaries and fills the buffers with
+ *                ghost particles accordingly.
  * =====================================================================================
  */
 

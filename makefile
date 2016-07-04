@@ -6,6 +6,7 @@ LDFlags= -lm
 SRCDIR = ./src/
 INCDIR = ./inc/
 BIN = ./bin/
+DATA = ./data/
 TARGET = nbod
 
 CXXFILES= $(shell ls $(SRCDIR)*.cpp | xargs -n1 basename)
@@ -14,17 +15,20 @@ CXXSRC= $(addprefix $(SRCDIR), $CXXFILES)
 CXXOBJECTS=$(addprefix $(BIN), $(CXXOBJS))
 
 
-all: $(BIN) $(CXXOBJECTS) 
+all: $(BIN) $(DATA) $(CXXOBJECTS) 
 	$(CC) $(CXXOBJECTS) -o $(TARGET) -I$(INCDIR)
 
 $(BIN):
 	mkdir $(BIN)
 
-clean:
-	rm -rf $(BIN) $(TARGET) out.*
+$(DATA):
+	mkdir $(DATA)
 
-animation:
-	mpirun -n 6 ./nbod -i 5000 -n 40 -f "out.txt" -a
+clean:
+	rm -rf $(BIN) $(DATA) $(TARGET) out.*
+
+animation: all
+	mpirun -n 2 ./nbod -i 5000 -n 40 -f "$(DATA)out.txt" -a
 	gnuplot -e "load \"animation.gnu\"" --persist
 	rm -f "out.txt"
 

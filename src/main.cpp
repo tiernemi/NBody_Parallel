@@ -19,16 +19,17 @@
 
 #include <iostream>
 #include "getopt.h"
-#include "system.hpp"
-#include "leapfrog.hpp"
-#include "leonard_jones.hpp"
 #include <cstdlib>
 #include <fstream>
 #include <tuple>
-#include "mpi_utils.hpp"
 #include "mpi.h"
+
+#include "mpi_utils.hpp"
 #include "torus_communicator.hpp"
 #include "time_utils.hpp"
+#include "system.hpp"
+#include "leapfrog.hpp"
+#include "leonard_jones.hpp"
 
 int main(int argc, char *argv[]) {
 
@@ -38,7 +39,6 @@ int main(int argc, char *argv[]) {
 	int numParticles = 10 ;
 	double deltaT = 0.001 ; // The size of the timestep
 	double cellLength = 10.0f ; // The length of the cell.
-	bool trackEnergy = false ; // Flag for printing energy.
 	bool animation = false ; // Flag for creating animation output.
 	bool benching = false ;
 	std::string filename = "" ; // Filename string.
@@ -59,9 +59,6 @@ int main(int argc, char *argv[]) {
 				break;
 			case 't':
 				deltaT = std::atof(optarg) ;
-				break;
-			case 'e':
-				trackEnergy = true ;
 				break;
 			case 'f':
 				filename = optarg ;
@@ -91,61 +88,27 @@ int main(int argc, char *argv[]) {
 	if (animation) {
 		// If no file name passed then print to cout. //
 		if (filename.compare("") == 0) {
-			if (trackEnergy) {
-				std::string enFileName("energy") ;
-				enFileName += ".txt" ;
-				std::ofstream en(enFileName) ;
-				nbodySystem.simulateEnergies(numIters, std::cout, en) ;
-				en.close() ;
-			} else {
-				nbodySystem.simulate(numIters, std::cout) ;
-			}
+			nbodySystem.simulate(numIters, std::cout) ;
 		} 
 		// Else print to filename. //
 		else {
 			filename += std::to_string(MPIUtils::rank) ;
 			std::ofstream posOutput(filename) ;
-			if (trackEnergy) {
-				std::string enFileName("energy") ;
-				enFileName += ".txt" ;
-				std::ofstream en(enFileName) ;
-				nbodySystem.simulateEnergies(numIters, posOutput, en) ;
-				en.close() ;
-			} else {
-				nbodySystem.simulate(numIters, posOutput) ;
-			}
+			nbodySystem.simulate(numIters, posOutput) ;
 			posOutput.close() ;
 		}
 	} else {
 	// If no file name passed then print to cout. //
 		if (filename.compare("") == 0) {
-			if (trackEnergy) {
-				std::string enFileName("energy") ;
-				enFileName += ".txt" ;
-				std::ofstream en(enFileName) ;
-				nbodySystem.simulateEnergies(numIters, en) ;
-				nbodySystem.printSystem(std::cout,numIters) ;
-				en.close() ;
-			} else {
-				nbodySystem.simulate(numIters) ;
-				nbodySystem.printSystem(std::cout,numIters) ;
-			}
+			nbodySystem.simulate(numIters) ;
+			nbodySystem.printSystem(std::cout,numIters) ;
 		} 
 		// Else print to filename.
 		else {
 			filename += std::to_string(MPIUtils::rank) ;
 			std::ofstream posOutput(filename) ;
-			if (trackEnergy) {
-				std::string enFileName("energy") ;
-				enFileName += ".txt" ;
-				std::ofstream en(enFileName) ;
-				nbodySystem.simulateEnergies(numIters, en) ;
-				nbodySystem.printSystem(posOutput,numIters) ;
-				en.close() ;
-			} else {
-				nbodySystem.simulate(numIters, posOutput) ;
-				nbodySystem.printSystem(posOutput,numIters) ;
-			}
+			nbodySystem.simulate(numIters, posOutput) ;
+			nbodySystem.printSystem(posOutput,numIters) ;
 			posOutput.close() ;
 		}
 

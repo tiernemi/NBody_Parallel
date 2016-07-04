@@ -18,13 +18,12 @@
  * =====================================================================================
  */
 
-
 /* 
  * ===  CLASS  =========================================================================
  *         Name:  MPIUtils
  *       Fields:  int rank - Rank of process.
  *                int nproc - Number of processes.
- *  Description:  Helper class for MPI functions.
+ *  Description:  Barebones helper class for MPI functions.
  * =====================================================================================
  */
 

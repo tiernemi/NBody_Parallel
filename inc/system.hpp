@@ -8,7 +8,8 @@
  *
  *    Description:  Header file for system class. The system contains N particles and
  *                  evaluates them based on an evaluation policy and updates based
- *                  on an update policy.
+ *                  on an update policy. Communication is done via a communication
+ *                  policy class. 
  *
  *        Version:  1.0
  *        Created:  04/12/2016 01:20:59 PM
@@ -32,27 +33,27 @@
  * ===  CLASS  =========================================================================
  *         Name:  System
  *       Fields:  std::vector<DataType> positions - Array storing position data.
- *	              std::vector<DataType> velocities - Array storing velocity data.
- *	              std::vector<DataType> forces - Array storing force data.
- *	              std::vector<DataType> boundaryGhostPositions - Array storing the ghost positions.
- *	              Datatype totCellLength - Total cell length.
- *	              Datatype totCellLengthInv - Inverse total cell length.
- *	              Datatype cellLengthX - X length of cell on process.
- *	              Datatype cellLengthY - Y length of cell on process.
- *	              Datatype lDxZone - The left boundary of a process.
- *	              Datatype rDxZone - The right boundary of a process.
- *	              Datatype bDyZone - The bot boundary of a process.
- *	              Datatype tDyZone - The top boundary of a process.
- *				  std::vector<std::vector<DataType>> sendBuffers - The buffer for sending data.
- *				  std::vector<std::vector<DataType>> recvBuffers - The buffer for recieve data.
- *				  DataType totEnergy - Total energy on process.
- *			 	  DataType initialEnergy - Initial energy of process.
- *			 	  Datatype initialSysEnergy - Initial energy of entire system.
+ *	          std::vector<DataType> velocities - Array storing velocity data.
+ *	          std::vector<DataType> forces - Array storing force data.
+ *	          std::vector<DataType> boundaryGhostPositions - Array storing the ghost positions.
+ *	          Datatype totCellLength - Total cell length.
+ *	          Datatype totCellLengthInv - Inverse total cell length.
+ *	          Datatype cellLengthX - X length of cell on process.
+ *	          Datatype cellLengthY - Y length of cell on process.
+ *	          Datatype lDxZone - The left boundary of a process.
+ *	          Datatype rDxZone - The right boundary of a process.
+ *	          Datatype bDyZone - The bot boundary of a process.
+ *	          Datatype tDyZone - The top boundary of a process.
+ *                std::vector<std::vector<DataType>> sendBuffers - The buffer for sending data.
+ *                std::vector<std::vector<DataType>> recvBuffers - The buffer for recieve data.
+ *                DataType totEnergy - Total energy on process.
+ *                DataType initialEnergy - Initial energy of process.
+ *                Datatype initialSysEnergy - Initial energy of entire system.
  *
  *  Description:  System of particles subject to a particular potential specified by the
  *                policy Potential and a particular integration scheme specified by the
  *                policy Integrator. All data associated with the particles is stored
- *                in contiguous arrays within in the system class. 
+ *                in contiguous arrays within in the system class for efficiency reasons.
  * =====================================================================================
  */
 
@@ -65,18 +66,14 @@ class System {
 	void addParticle(const std::pair<DataType,DataType> &, const std::pair<DataType,DataType> &) ;
 	void simulate(int) ;
 	void simulate(int, std::ostream &) ;
-	void simulateEnergies(int, std::ostream &, std::ostream &) ;
-	void simulateEnergies(int, std::ostream &) ;
 	int numParticles() const ;
 	void printSystem(std::ostream &, int iter) const ;
 	void printEnergies(std::ostream &, int iter) const ;
  private:
 	void updatePositions() ;
 	void updateVelocities() ;
-	void updateVelocitiesEnergies() ;
 	void confineParticles() ;
 	void updateForces() ;
-	void updateForcesEnergies() ;
 	void appendInteractionsToBuffers() ;
 	void appendTransitionsToBuffers() ;
 	void communicateInteractionsTransitions() ;
@@ -109,27 +106,32 @@ class System {
 // TEMPLATED MEMBER FUNCTIONS //
 
 /* 
- * ===  MEMBER FUNCTION CLASS : System  ======================================
+ * ===  MEMBER FUNCTION CLASS : System  ===============================================
  *         Name:  System
- *    Arguments:  
- *      Returns:  
- *  Description:  
+ *    Arguments:  const DataType & totCellLength - The cell length of the simulation.
+ *  Description:  Constructor for System class. Initialises communications, buffers and
+ *                cell information.
  * =====================================================================================
  */
 
 template <class DataType, class Integrator, class Potential, class Communicator> 
 System<DataType,Integrator,Potential,Communicator>::System(const DataType & totCellLength) : totCellLength{totCellLength}, totCellLengthInv{1./totCellLength} {
+	// Initialise interprocess communicator. // 
 	Communicator::initCommunicator() ;
+	// Initialise process specific and global bounds of the simulation. //
 	cellLengthY = totCellLength/double(Communicator::getCommDims()[0]) ;
 	cellLengthX = totCellLength/double(Communicator::getCommDims()[1]) ;
 	bGlobalYOffset = cellLengthY*Communicator::getCoords()[0] ;
 	lGlobalXOffset = cellLengthX*Communicator::getCoords()[1] ;
 	rGlobalXOffset = lGlobalXOffset + cellLengthX ;
 	tGlobalYOffset = bGlobalYOffset + cellLengthY ;
+	// Initialise energy. //
 	totEnergy = 0 ;
+	// Initialise buffers. //
 	sendBuffers.resize(8) ;
 	recvBuffers.resize(8) ;
 	initialSysEnergy = 0 ;
+	// Initialise transition zones. //
 	lDxZone = lGlobalXOffset + Potential::cutOffDist ;
 	rDxZone = lGlobalXOffset + cellLengthX - Potential::cutOffDist ;
 	bDyZone = bGlobalYOffset + Potential::cutOffDist ;
@@ -142,7 +144,9 @@ System<DataType,Integrator,Potential,Communicator>::System(const DataType & totC
  *    Arguments: int seed - Seed for rng.
  *               int numParts - Number of particles.
  *  Description: Randomly distributes particles in box given a seed. All particles must
- *               be further than 0.8 apart.
+ *               be further than 0.8 apart. Currently contains a bug where large numbers
+ *               of particles in a confined space may have no stable configuration so
+ *               the function wont terminate.
  /===================================================================================
  */
 
@@ -236,7 +240,8 @@ void System<DataType,Integrator,Potential,Communicator>::addParticle(const std::
  * ===  MEMBER FUNCTION CLASS : System  ================================================
  *         Name:  simulate
  *    Arguments:  int numIters - Number of iterations to run simulation.
- *  Description:  Simulate the system for a set number of iterations.
+ *  Description:  Simulate the system for a set number of iterations. Does not print
+ *                positions.
  * ====================================================================================
  */
 
@@ -305,122 +310,6 @@ void System<DataType,Integrator,Potential,Communicator>::simulate(int numIters, 
 
 /* 
  * ===  MEMBER FUNCTION CLASS : System  ================================================
- *         Name:  simulateEnergies
- *    Arguments:  int numIters - Number of iterations to run simulation.
- *                std::ostream & ouputPos - Output stream to print positions to.
- *                std::ostream & ouputEn - Output stream to print energies to.
- *  Description:  Simulate the system for a set number of iterations. Prints positions
- *                and energies.
- * ====================================================================================
- */
-
-template <class DataType, class Integrator, class Potential, class Communicator> 
-void System<DataType,Integrator,Potential,Communicator>::simulateEnergies(int numIters, std::ostream & outputPos, std::ostream & outputEn) {
-	// Initialise the forces/energies. //
-	initialEnergy = 0 ;
-	totEnergy = 0 ;
-	clearBuffers() ;
-	appendTransitionsToBuffers() ;
-	appendInteractionsToBuffers() ;
-	communicateInteractionsTransitions() ;
-	updateForcesEnergies() ;	
-	// Prime the velocity based on the integration policy. //
-	for (unsigned int i = 0 ; i < positions.size() ; i+=2) {
-		Integrator::initialise(&positions[i], &velocities[i], &forces[i]) ;
-	}
-	// Get initial energy of system and advance 1 time step. //
-	updateVelocitiesEnergies() ;
-	initialEnergy = totEnergy ;
-	// Send rank 0 the total initial system energy.
-	MPI_Reduce(&totEnergy,&initialSysEnergy,1,MPI_DOUBLE,MPI_SUM,0,MPI_COMM_WORLD) ;
-	updatePositions() ;
-	// Print intial energies. //
-	printEnergies(outputEn,0) ;
-	totEnergy = 0 ;
-	// MPI Comms. //
-	clearBuffers() ;
-	appendTransitionsToBuffers() ;
-	appendInteractionsToBuffers() ;
-	communicateInteractionsTransitions() ;
-	// Update forces for timesetp 2. //
-	updateForcesEnergies() ;
-	outputPos << std::endl << std::endl ;
-
-	// Update velocities and positions based on the integration policy. //
-	for (int i = 1; i < numIters ; ++i) {
-		updateVelocitiesEnergies() ;
-		updatePositions() ;
-		// MPI comms. //
-		clearBuffers() ;
-		appendTransitionsToBuffers() ;
-		appendInteractionsToBuffers() ;
-		communicateInteractionsTransitions() ;
-		// Print energies. //
-		printEnergies(outputEn,i) ;
-		totEnergy = 0 ;
-		updateForcesEnergies() ;
-		printSystem(outputPos,i) ;
-		outputPos << std::endl << std::endl ;
-	}
-}		/* -----  end of member function simulate  ----- */
-
-/* 
- * ===  MEMBER FUNCTION CLASS : System  ================================================
- *         Name:  simulateEnergies
- *    Arguments:  int numIters - Number of iterations to run simulation.
- *                std::ostream & ouputEn - Output stream to print energies to.
- *  Description:  Simulate the system for a set number of iterations. Prints energies.
- * ====================================================================================
- */
-
-template <class DataType, class Integrator, class Potential, class Communicator> 
-void System<DataType,Integrator,Potential,Communicator>::simulateEnergies(int numIters, std::ostream & outputEn) {
-	// MPI Comms. //
-	clearBuffers() ;
-	appendTransitionsToBuffers() ;
-	appendInteractionsToBuffers() ;
-	communicateInteractionsTransitions() ;
-	// Initialise the forces. //
-	initialEnergy = 0 ;
-	totEnergy = 0 ;
-	updateForcesEnergies() ;
-	// Prime the velocity based on the integration policy. //
-	for (unsigned int i = 0 ; i < positions.size() ; i+=2) {
-		Integrator::initialise(&positions[i], &velocities[i], &forces[i]) ;
-	}
-
-	// Get initial energy of system and advance 1 time step. //
-	updateVelocitiesEnergies() ;
-	initialEnergy = totEnergy ;
-	// Send rank 0 the total initial system energy.
-	MPI_Reduce(&totEnergy,&initialSysEnergy,1,MPI_DOUBLE,MPI_SUM,0,MPI_COMM_WORLD) ;
-	updatePositions() ;
-	totEnergy = 0 ;
-	// MPI Comms. //
-	clearBuffers() ;
-	appendTransitionsToBuffers() ;
-	appendInteractionsToBuffers() ;
-	communicateInteractionsTransitions() ;
-	// Update forces for timestep t1. //
-	updateForcesEnergies() ;
-	// Update velocities and positions based on the integration policy. //
-	for (int i = 1; i < numIters ; ++i) {
-		updateVelocitiesEnergies() ;
-		updatePositions() ;
-		printEnergies(outputEn,i) ;
-		totEnergy = 0 ;
-		// MPI Comms. //
-		clearBuffers() ;
-		appendTransitionsToBuffers() ;
-		appendInteractionsToBuffers() ;
-		communicateInteractionsTransitions() ;
-		updateForcesEnergies() ;
-	}
-}		/* -----  end of member function simulate  ----- */
-
-
-/* 
- * ===  MEMBER FUNCTION CLASS : System  ================================================
  *         Name:  numParticles
  *      Returns:  The number of particles in the system.
  *  Description:  Getter function for the number of particles in the system.
@@ -462,21 +351,6 @@ void System<DataType,Integrator,Potential,Communicator>::updateVelocities() {
 
 /* 
  * ===  MEMBER FUNCTION CLASS : System  ================================================
- *         Name:  updateVelocitiesEnergies
- *  Description:  Update the velocities of the particles in the system.
- * =====================================================================================
- */
-
-template <class DataType, class Integrator, class Potential, class Communicator> 
-void System<DataType,Integrator,Potential,Communicator>::updateVelocitiesEnergies() {	
-	for (unsigned int i = 0 ; i < positions.size() ; i+=2) {
-		Integrator::updateVelocity(&velocities[i],&forces[i]) ;
-		totEnergy += (velocities[i]*velocities[i] + velocities[i+1]*velocities[i+1])/2.0 ;
-	}
-}		/* -----  end of member function updateVelocities  ----- */
-
-/* 
- * ===  MEMBER FUNCTION CLASS : System  ================================================
  *         Name:  ConfineParticles
  *  Description:  Confines the particles to the box in order to enforce periodic boundaries.
  * =====================================================================================
@@ -491,9 +365,12 @@ void System<DataType,Integrator,Potential,Communicator>::confineParticles() {
 }		/* -----  end of member function function  ----- */
 
 /* 
- * ===  MEMBER FUNCTION CLASS : System  ======================================
+ * ===  MEMBER FUNCTION CLASS : System  ===============================================
  *         Name:  updateForces
- *  Description:  Update the forces of the particles in the system.
+ *  Description:  Update the forces of the particles in the system. Uses suboptimal pairwise
+ *                checking. If I have time I will implement forcesweep policy that uses
+ *                different alogirithms to generate the calculated interactions. An
+ *                example would be barnes hutts.
  * =====================================================================================
  */
 
@@ -547,65 +424,6 @@ void System<DataType,Integrator,Potential,Communicator>::updateForces() {
 	}
 }		/* -----  end of member function updateForces  ----- */
 
-/* 
- * ===  MEMBER FUNCTION CLASS : System  ======================================
- *         Name:  updateForcesEnergies
- *  Description:  Update the forces and energies of the particles in the system.
- * =====================================================================================
- */
-
-template <class DataType, class Integrator, class Potential, class Communicator> 
-void System<DataType,Integrator,Potential,Communicator>::updateForcesEnergies() {	
-	unsigned int numParts = numParticles() ;
-	for (auto i = forces.begin(); i != forces.end(); ++i) {
-		*i = 0 ;
-	}
-	// For each ij interaction calculate force. //
-	for (unsigned int i = 0 ; i < numParts*2 ; i+=2) {
-		for (unsigned int j = i+2 ; j < numParts*2 ; j+=2) {	
-			// Get shortest connecting vector in periodic system. //
-			DataType x_comp = (positions[j] - positions[i]) ;
-			x_comp -= totCellLength*std::round(x_comp*totCellLengthInv) ;
-			DataType y_comp = positions[j+1] - positions[i+1] ;
-			y_comp -= totCellLength*std::round(y_comp*totCellLengthInv) ;
-			// Calculate the force for this vector using the distance. //
-			DataType distSqr = x_comp*x_comp + y_comp*y_comp ;
-			// Cutoff distance is when r = 2.5 sigma  . //
-			if (distSqr < Potential::cutOffDistSqr) {
-				DataType forceMag = Potential::calcForce(distSqr) ;
-				DataType xForce = forceMag*x_comp ;
-				DataType yForce = forceMag*y_comp ;
-				forces[i] += xForce ;
-				forces[i+1] += yForce ;
-				forces[j] -= xForce ;
-				forces[j+1] -= yForce ;
-				// Calc energies. //
-				totEnergy += Potential::calcEnergy(distSqr) ;
-			}
-		}
-	}
-	// Consider the ghost particles. //
-	for (unsigned int i = 0 ; i < numParts*2 ; i+=2) {
-		for (unsigned int j = 0 ; j < boundaryGhostPositions.size() ; j+=2) {
-			// Get shortest connecting vector in periodic system. //
-			DataType x_comp = (boundaryGhostPositions[j] - positions[i]) ;
-			x_comp -= totCellLength*std::round(x_comp*totCellLengthInv) ;
-			DataType y_comp = boundaryGhostPositions[j+1] - positions[i+1] ;
-			y_comp -= totCellLength*std::round(y_comp*totCellLengthInv) ;
-			// Calculate the force for this vector using the distance. //
-			DataType distSqr = x_comp*x_comp + y_comp*y_comp ;
-			// Cutoff distance is when r = 2.5 sigma  . //
-			if (distSqr < Potential::cutOffDistSqr) {  
-				DataType forceMag = Potential::calcForce(distSqr) ;
-				DataType xForce = forceMag*x_comp ;
-				DataType yForce = forceMag*y_comp ;
-				forces[i] += xForce ;
-				forces[i+1] += yForce ;
-				totEnergy += Potential::calcEnergy(distSqr) ;
-			}
-		}
-	}
-}		/* -----  end of member function updateForces  ----- */
 
 
 /* 

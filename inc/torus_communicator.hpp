@@ -28,7 +28,7 @@
  *       Fields:  MPI_Comm communicator - The cartesian communicator for system.
  *                int cartCoords[2] - The cartesian co-ordinates of system.
  *                int commDims[2] - The communicator dimensions.
- *				  int neighbourRanks[8] - The ranks of the neighbouring processes.
+ *                int neighbourRanks[8] - The ranks of the neighbouring processes.
  *  Description:  Communicator used to send/recieve buffer data to and from 8 nearest
  *                neighbours.
  * =====================================================================================
